@@ -2,6 +2,8 @@ networkit_add_test(centrality ApproxBetweennessGTest
     distance generators)
 networkit_add_test(centrality CentralityGTest
     auxiliary generators io numerics structures)
+networkit_add_test(centrality CompositeCentralityGTest
+    auxiliary components generators graph)
 networkit_add_test(centrality DynBetweennessGTest
     auxiliary generators graph io)
 networkit_add_test(centrality SpanningEdgeCentralityGTest

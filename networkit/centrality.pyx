@@ -2142,6 +2142,189 @@ cdef class Sfigality(Centrality):
 		self._G = G
 		self._this = new _Sfigality(G._this)
 
+cdef extern from "<networkit/centrality/CompositeCentrality.hpp>":
+
+	cdef enum class _CompositeBetweennessMethod "NetworKit::CompositeCentrality::BetweennessMethod":
+		EXACT
+		APPROXIMATE
+		KADABRA
+
+	cdef enum class _CompositeClosenessMethod "NetworKit::CompositeCentrality::ClosenessMethod":
+		EXACT
+		APPROXIMATE
+
+	cdef enum class _CompositeComponent "NetworKit::CompositeCentrality::Component":
+		PAGERANK
+		BETWEENNESS
+		DEGREE
+		CLOSENESS
+
+	cdef cppclass _CompositeCentrality "NetworKit::CompositeCentrality" (_Centrality):
+		_CompositeCentrality(_Graph, double alpha, double beta, double gamma, bool_t scaleComponents) except +
+		void setComponentWeights(double pageRank, double betweenness, double degree, double closeness) except +
+		void setBetweennessMethod(_CompositeBetweennessMethod method, double epsilon, double delta) except +
+		void setClosenessMethod(_CompositeClosenessMethod method, count samples) except +
+		void setDemandHistories(vector[vector[double]] histories, count bins) except +
+		void setNodeAttributes(vector[double] attributes) except +
+		const vector[double] &centralityScores() except +
+		const vector[double] &entropyScores() except +
+		const vector[double] &attributeScores() except +
+		const vector[double] &componentScores(_CompositeComponent component) except +
+
+	double _compositeDemandEntropy "NetworKit::CompositeCentrality::demandEntropy"(vector[double] values, count bins) except +
+
+cdef class CompositeCentrality(Centrality):
+	"""
+	CompositeCentrality(G, alpha=0.4, beta=0.35, gamma=0.25, scaleComponents=False)
+
+	Weighted composite of PageRank, betweenness, degree centrality and closeness, optionally
+	combined with the entropy of a per-node demand history and a per-node attribute. This is the
+	Centrality-Entropy Index (CEI) of P. Pokharel (Future Technologies Conference 2026):
+	:math:`s(v) = \\alpha C(v) + \\beta H(v) + \\gamma R(v)`.
+
+	C(v) is :math:`0.35 \\cdot PageRank + 0.30 \\cdot betweenness + 0.20 \\cdot degree + 0.15 \\cdot closeness`,
+	divided by its maximum. By default the four parts use the normalisations of NetworkX, whose
+	scales differ, so the weights do not set each part's share; set `scaleComponents` to divide
+	each part by its maximum first. H(v) is the Shannon entropy of the node's demand history
+	(values in [0, 1], 10 bins), divided by log2(10), and 0 without a history. R(v) is a
+	per-node attribute, 0 if none is set. Edge weights are ignored.
+
+	Parameters
+	----------
+	G : networkit.Graph
+		The input graph.
+	alpha : float, optional
+		Weight of the composite centrality C. Default: 0.4
+	beta : float, optional
+		Weight of the demand entropy H. Default: 0.35
+	gamma : float, optional
+		Weight of the node attribute R. Default: 0.25
+	scaleComponents : bool, optional
+		Divide each of the four centralities by its maximum before weighting. Default: False
+	"""
+
+	def __cinit__(self, Graph G, double alpha=0.4, double beta=0.35, double gamma=0.25, bool_t scaleComponents=False):
+		self._G = G
+		self._this = new _CompositeCentrality(G._this, alpha, beta, gamma, scaleComponents)
+
+	def setComponentWeights(self, double pageRank=0.35, double betweenness=0.30, double degree=0.20, double closeness=0.15):
+		"""
+		setComponentWeights(pageRank=0.35, betweenness=0.30, degree=0.20, closeness=0.15)
+
+		Sets the weights of the four centralities in C. A part with weight 0 is not computed.
+		"""
+		(<_CompositeCentrality*>(self._this)).setComponentWeights(pageRank, betweenness, degree, closeness)
+
+	def setBetweennessMethod(self, method="exact", double epsilon=0.01, double delta=0.1):
+		"""
+		setBetweennessMethod(method="exact", epsilon=0.01, delta=0.1)
+
+		Sets how betweenness is computed: "exact" (Betweenness), "approximate"
+		(ApproxBetweenness) or "kadabra" (KadabraBetweenness). epsilon and delta are the
+		additive error and failure probability of the sampling methods, which need an
+		undirected graph.
+		"""
+		cdef _CompositeBetweennessMethod m
+		if method == "exact":
+			m = _CompositeBetweennessMethod.EXACT
+		elif method == "approximate":
+			m = _CompositeBetweennessMethod.APPROXIMATE
+		elif method == "kadabra":
+			m = _CompositeBetweennessMethod.KADABRA
+		else:
+			raise ValueError("method must be 'exact', 'approximate' or 'kadabra'")
+		(<_CompositeCentrality*>(self._this)).setBetweennessMethod(m, epsilon, delta)
+
+	def setClosenessMethod(self, method="exact", count samples=100):
+		"""
+		setClosenessMethod(method="exact", samples=100)
+
+		Sets how closeness is computed: "exact" (Closeness) or "approximate" (ApproxCloseness,
+		connected graphs only, with the given number of samples).
+		"""
+		cdef _CompositeClosenessMethod m
+		if method == "exact":
+			m = _CompositeClosenessMethod.EXACT
+		elif method == "approximate":
+			m = _CompositeClosenessMethod.APPROXIMATE
+		else:
+			raise ValueError("method must be 'exact' or 'approximate'")
+		(<_CompositeCentrality*>(self._this)).setClosenessMethod(m, samples)
+
+	def setDemandHistories(self, histories, count bins=10):
+		"""
+		setDemandHistories(histories, bins=10)
+
+		Sets the demand history of every node: a sequence with one sequence of values in [0, 1]
+		per node id (length G.upperNodeIdBound()).
+		"""
+		cdef vector[vector[double]] h = [[float(x) for x in row] for row in histories]
+		(<_CompositeCentrality*>(self._this)).setDemandHistories(h, bins)
+
+	def setNodeAttributes(self, attributes):
+		"""
+		setNodeAttributes(attributes)
+
+		Sets the attribute R of every node: one value per node id (length G.upperNodeIdBound()).
+		"""
+		cdef vector[double] a = [float(x) for x in attributes]
+		(<_CompositeCentrality*>(self._this)).setNodeAttributes(a)
+
+	def centralityScores(self):
+		"""
+		centralityScores()
+
+		Returns C, the composite centrality divided by its maximum.
+		"""
+		return (<_CompositeCentrality*>(self._this)).centralityScores()
+
+	def entropyScores(self):
+		"""
+		entropyScores()
+
+		Returns H, the normalised demand entropy of every node (0 without a history).
+		"""
+		return (<_CompositeCentrality*>(self._this)).entropyScores()
+
+	def attributeScores(self):
+		"""
+		attributeScores()
+
+		Returns R, the node attributes (0 if none were set).
+		"""
+		return (<_CompositeCentrality*>(self._this)).attributeScores()
+
+	def componentScores(self, component):
+		"""
+		componentScores(component)
+
+		Returns one of the four centralities as it entered C: "pagerank", "betweenness",
+		"degree" or "closeness".
+		"""
+		cdef _CompositeComponent c
+		if component == "pagerank":
+			c = _CompositeComponent.PAGERANK
+		elif component == "betweenness":
+			c = _CompositeComponent.BETWEENNESS
+		elif component == "degree":
+			c = _CompositeComponent.DEGREE
+		elif component == "closeness":
+			c = _CompositeComponent.CLOSENESS
+		else:
+			raise ValueError("component must be 'pagerank', 'betweenness', 'degree' or 'closeness'")
+		return (<_CompositeCentrality*>(self._this)).componentScores(c)
+
+	@staticmethod
+	def demandEntropy(values, count bins=10):
+		"""
+		demandEntropy(values, bins=10)
+
+		Normalised Shannon entropy of values in [0, 1] over equal-width bins, with the binning
+		rules of numpy.histogram. Returns 0 for an empty sequence.
+		"""
+		cdef vector[double] v = [float(x) for x in values]
+		return _compositeDemandEntropy(v, bins)
+
 cdef extern from "<networkit/centrality/PermanenceCentrality.hpp>":
 
 	cdef cppclass _PermanenceCentrality "NetworKit::PermanenceCentrality"(_Algorithm):

@@ -230,6 +230,48 @@ class TestCentrality(unittest.TestCase):
             apr.getSquareErrorEstimates(), [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         )
 
+    def testCompositeCentrality(self):
+        import networkx as nx
+        for directed in [False, True]:
+            G = nk.generators.ErdosRenyiGenerator(60, 0.08, directed=directed).generate()
+            if not directed:
+                G = nk.components.ConnectedComponents.extractLargestConnectedComponent(G, True)
+            nxG = nk.nxadapter.nk2nx(G)
+            n = G.numberOfNodes()
+            parts = [
+                (0.35, nx.pagerank(nxG, alpha=0.85, tol=1e-12, max_iter=100000)),
+                (0.30, nx.betweenness_centrality(nxG)),
+                (0.20, nx.degree_centrality(nxG)),
+                (0.15, nx.closeness_centrality(nxG)),
+            ]
+            expected = [sum(w * part[u] for w, part in parts) for u in range(n)]
+            top = max(expected)
+            histories = [[(u * 7 % 10) / 10, 0.95] if u % 3 else [] for u in range(n)]
+            attributes = [u / n for u in range(n)]
+
+            cc = nk.centrality.CompositeCentrality(G)
+            cc.setDemandHistories(histories)
+            cc.setNodeAttributes(attributes)
+            cc.run()
+            entropy = cc.entropyScores()
+            for u in range(n):
+                self.assertAlmostEqual(cc.centralityScores()[u], expected[u] / top, delta=1e-7)
+                ref = nk.centrality.CompositeCentrality.demandEntropy(histories[u])
+                counts, _ = np.histogram(np.clip(histories[u], 0, 1), bins=10, range=(0, 1))
+                p = counts[counts > 0] / max(1, counts.sum())
+                self.assertAlmostEqual(ref, float(-(p * np.log2(p)).sum() / np.log2(10)), delta=1e-12)
+                self.assertAlmostEqual(entropy[u], ref, delta=1e-12)
+                self.assertAlmostEqual(
+                    cc.scores()[u],
+                    0.40 * cc.centralityScores()[u] + 0.35 * entropy[u] + 0.25 * attributes[u],
+                    delta=1e-12,
+                )
+
+        with self.assertRaises(ValueError):
+            cc.setBetweennessMethod("unknown")
+        with self.assertRaises(ValueError):
+            cc.componentScores("unknown")
+
     def testCoreDecomposition(self):
         CL = nk.centrality.CoreDecomposition(self.L)
         CL.run()
